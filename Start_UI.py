@@ -7,15 +7,15 @@ warnings.filterwarnings("ignore", category=DeprecationWarning, message=".*sipPyT
 
 # 导入需要的库
 import traceback
-from MapOfMars.MainFrame import Ui_MainWindow
+from Windows.MainFrame import Ui_MainWindow
+from WindowClass import * # 导入封装好的窗口
 import sys
 from PyQt5.QtWidgets import (
-    QApplication, QMainWindow, QFileDialog, QMessageBox
+    QApplication, QMainWindow, QFileDialog, QMessageBox,
+    QTabWidget, QTableWidgetItem
 )
 from PyQt5.QtCore import Qt
-from img_show import ImageProcessor
-from class_window import Ui_ClassWindow
-from ImgInfo_window import Ui_ImgInfowindow
+import img_utils
 
 
 class MainWin(QMainWindow, Ui_MainWindow):
@@ -25,58 +25,68 @@ class MainWin(QMainWindow, Ui_MainWindow):
         # 调用监听函数
         self.controller()
         # 初始化变量
-        self.image_path = ""
-        self.dataset = None
-        self.band_data = {}
-        self.current_band = 1
-        self.cls_window = None  # 存储分类窗口的引用
-        self.imginfo_window = None
+        self.ds = None
+        self.intrinsic = {}
+        self.proj = {}
+        self.bands = {}
+        # 缓存两个窗口和元数据信息
+        self.cls_window = None
+        self.info_win = None
 
     # 监听事件都放在这里面
     def controller(self):
-        self.open_action.triggered.connect(self.Select_Image)
+        self.open_action.triggered.connect(self.on_open)
         self.clsaction.triggered.connect(self.Open_ClcWindow)
-        self.ImgInfo_action.triggered.connect(self.open_ImgInfoWindow)
+        self.ImgInfo_action.triggered.connect(self.show_info)
+        self.testButton.clicked.connect(self.on_open)
 
-    def Select_Image(self):
+    def on_open(self):
         """打开遥感影像文件"""
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "打开遥感影像", "",
-            "遥感影像 (*.tif *.tiff *.img *.jp2 *.hdf);;所有文件 (*.*)"
-        )
+        fp, _ = QFileDialog.getOpenFileName(self, "打开遥感影像", "",
+                                            "影像(*.tif *.tiff *.img);;所有(*.*)")
+        if not fp: return
+        try:
+            self.ds, self.intrinsic, self.proj, self.bands = img_utils.load_image_all(fp, parent=self)
+        except Exception as e:
+            self.statusBar().showMessage(str(e))
+            return
+        # 显示第一波段
+        pix = img_utils.make_pixmap_from_band(self.bands[1],
+                                                  self.imglabel.width(),
+                                                  self.imglabel.height())
+        self.imglabel.setPixmap(pix)
+        self.statusBar().showMessage(f"已加载 {fp}")
 
-        if file_path:
-            self.image_path = file_path
-            self.load_image()
+    def show_info(self):
+        """打开 Info 窗口，把 intrinsic 显示到 InfoTab1，把 proj 显示到 InfoTab2"""
+        if self.info_win is None:
+            self.info_win = ImgInfoWindow(parent=self)
+            self.info_win.destroyed.connect(lambda: setattr(self, 'info_win', None))
 
-    def load_image(self):
-        """加载并处理遥感影像"""
-        # 使用工具类处理图像
-        self.dataset, self.band_data, info, error = ImageProcessor.load_image(
-            self.image_path,
-            self.statusbar,
-            parent=self
-        )
+        InfoTab1, InfoTab2 = self.info_win.InfoTab1, self.info_win.InfoTab2
 
-        if self.dataset and self.band_data:
-            # 显示第一个波段
-            self.current_band = 1
-            self.update_image()
-            self.textEdit.setPlainText(info)
-        elif error:
-            self.statusbar.showMessage(f"加载失败: {error}")
+        # 填 InfoTab1
+        InfoTab1.clear()
+        InfoTab1.setRowCount(len(self.intrinsic))
+        InfoTab1.setColumnCount(2)
+        InfoTab1.setHorizontalHeaderLabels(["属性", "值"])
+        for i, (k, v) in enumerate(self.intrinsic.items()):
+            InfoTab1.setItem(i, 0, QTableWidgetItem(k))
+            InfoTab1.setItem(i, 1, QTableWidgetItem(str(v)))
+        InfoTab1.resizeColumnsToContents()
 
-    def update_image(self):
-        """更新显示的图像"""
-        pixmap = ImageProcessor.update_image(
-            self.band_data,
-            self.current_band,
-            self.label,
-            self.statusbar
-        )
+        # 填 InfoTab2
+        InfoTab2.clear()
+        InfoTab2.setRowCount(len(self.proj))
+        InfoTab2.setColumnCount(2)
+        InfoTab2.setHorizontalHeaderLabels(["参数", "数值"])
+        for i, (k, v) in enumerate(self.proj.items()):
+            InfoTab2.setItem(i, 0, QTableWidgetItem(k))
+            InfoTab2.setItem(i, 1, QTableWidgetItem(str(v)))
+        InfoTab2.resizeColumnsToContents()
 
-        if pixmap:
-            self.label.setPixmap(pixmap)
+        self.info_win.show()
+        self.info_win.activateWindow()
 
     def Open_ClcWindow(self):
         """打开分类窗口，使用单例模式确保只打开一个"""
@@ -93,43 +103,42 @@ class MainWin(QMainWindow, Ui_MainWindow):
 
     def open_ImgInfoWindow(self):
         if self.imginfo_window is None:
-            # 创建新窗口，并设置主窗口为父对象
             self.imginfo_window = ImgInfoWindow(parent=self)
-            # 当窗口关闭时自动清除引用
-            self.imginfo_window.destroyed.connect(lambda: setattr(self, 'cls_window', None))
+            self.imginfo_window.destroyed.connect(
+                lambda: setattr(self, 'imginfo_window', None)
+            )
 
-        # 如果窗口已最小化则恢复，否则激活
+        InfoTab1 = self.imginfo_window.InfoTab1
+        InfoTab2 = self.imginfo_window.InfoTab2
+
+        # 填充 InfoTab1（Intrinsic）
+        data1 = self.current_intrinsic
+        InfoTab1.clear()
+        InfoTab1.setRowCount(len(data1))
+        InfoTab1.setColumnCount(2)
+        InfoTab1.setHorizontalHeaderLabels(["属性", "值"])
+        for row, (k, v) in enumerate(data1.items()):
+            InfoTab1.setItem(row, 0, QTableWidgetItem(k))
+            InfoTab1.setItem(row, 1, QTableWidgetItem(str(v)))
+        InfoTab1.resizeColumnsToContents()
+
+        # 填充 InfoTab2（Projection）
+        data2 = self.current_proj
+        InfoTab2.clear()
+        InfoTab2.setRowCount(len(data2))
+        InfoTab2.setColumnCount(2)
+        InfoTab2.setHorizontalHeaderLabels(["参数", "数值"])
+        for row, (k, v) in enumerate(data2.items()):
+            InfoTab2.setItem(row, 0, QTableWidgetItem(k))
+            InfoTab2.setItem(row, 1, QTableWidgetItem(str(v)))
+        InfoTab2.resizeColumnsToContents()
+
+        # 最后显示
         if self.imginfo_window.isMinimized():
             self.imginfo_window.showNormal()
         else:
             self.imginfo_window.show()
-            self.imginfo_window.activateWindow()
-
-
-class ClassWindow(QMainWindow, Ui_ClassWindow):
-    def __init__(self, parent=None):
-        super(ClassWindow, self).__init__(parent)
-        self.setupUi(self)
-        # 设置窗口标志，使其作为独立窗口但保持与主窗口的关系
-        self.setWindowFlag(Qt.Window, True)
-
-    def closeEvent(self, event):
-        """重写关闭事件，确保完全关闭而不是隐藏"""
-        self.deleteLater()
-        super().closeEvent(event)
-
-
-class ImgInfoWindow(QMainWindow, Ui_ImgInfowindow):
-    def __init__(self, parent=None):
-        super(ImgInfoWindow, self).__init__(parent)
-        self.setupUi(self)
-        # 设置窗口标志，使其作为独立窗口但保持与主窗口的关系
-        self.setWindowFlag(Qt.Window, True)
-
-    def closeEvent(self, event):
-        """重写关闭事件，确保完全关闭而不是隐藏"""
-        self.deleteLater()
-        super().closeEvent(event)
+        self.imginfo_window.activateWindow()
 
 
 # 显示QT运行中存在的错误
