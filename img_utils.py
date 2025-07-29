@@ -6,6 +6,7 @@ from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtWidgets import QMessageBox
 from PyQt5.QtCore import Qt
 
+
 def read_dataset(path, parent=None):
     """打开 GDAL 数据集并做初步校验。返回 dataset 或抛出异常。"""
     ds = gdal.Open(path)
@@ -15,6 +16,7 @@ def read_dataset(path, parent=None):
             QMessageBox.critical(parent, "错误", msg)
         raise IOError(msg)
     return ds
+
 
 def extract_metadata(dataset):
     """从 GDAL dataset 中提取自身信息和投影信息，返回两个 dict。"""
@@ -40,14 +42,15 @@ def extract_metadata(dataset):
     proj = {
         "投影类型": srs.GetAttrValue("PROJECTION", 0),
         "标准纬线": f"{srs.GetNormProjParm(osr.SRS_PP_STANDARD_PARALLEL_1, 0.0)}°",
-        "中央经线": f"{srs.GetNormProjParm(osr.SRS_PP_CENTRAL_MERIDIAN,   0.0)}°",
-        "假东距": f"{srs.GetNormProjParm(osr.SRS_PP_FALSE_EASTING,      0.0)} m",
-        "假北距": f"{srs.GetNormProjParm(osr.SRS_PP_FALSE_NORTHING,     0.0)} m",
+        "中央经线": f"{srs.GetNormProjParm(osr.SRS_PP_CENTRAL_MERIDIAN, 0.0)}°",
+        "假东距": f"{srs.GetNormProjParm(osr.SRS_PP_FALSE_EASTING, 0.0)} m",
+        "假北距": f"{srs.GetNormProjParm(osr.SRS_PP_FALSE_NORTHING, 0.0)} m",
         "线性单位": srs.GetLinearUnitsName(),
         "椭球长半轴": f"{srs.GetSemiMajor():.1f} m"
     }
 
     return intrinsic, proj
+
 
 def read_band_data(dataset):
     """读取所有波段到一个 dict: {band_index: numpy数组}"""
@@ -59,6 +62,7 @@ def read_band_data(dataset):
         bands[i] = arr
     return bands
 
+
 def make_pixmap_from_band(arr, width, height):
     """把单波段 numpy 数组归一化、着色并转换成 QPixmap。"""
     mn, mx = float(arr.min()), float(arr.max())
@@ -69,6 +73,7 @@ def make_pixmap_from_band(arr, width, height):
     pix = QPixmap.fromImage(qimg).scaled(width, height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
     return pix
 
+
 def load_image_all(path, parent=None):
     """
     一步到位：读数据集、提取元数据、读波段数据
@@ -78,3 +83,32 @@ def load_image_all(path, parent=None):
     intrinsic, proj = extract_metadata(ds)
     bands = read_band_data(ds)
     return ds, intrinsic, proj, bands
+
+
+def get_unique_colors(rgb):
+    """
+    通过读取的png，获得其中颜色索引，并与不同地貌类别对应
+    输入：
+      rgb: np.ndarray, shape = (H, W, 3), dtype = uint8
+    返回：
+      一个 list，元素是 (r, g, b) 三元组，表示图像中出现过的所有颜色
+    """
+    # 分离通道并提升到 uint32，避免溢出
+    r = rgb[:, :, 0].astype(np.uint32)
+    g = rgb[:, :, 1].astype(np.uint32)
+    b = rgb[:, :, 2].astype(np.uint32)
+
+    # 把 (R,G,B) 打包成一个 uint32 : 0xRRGGBB
+    packed = (r << 16) | (g << 8) | b
+
+    # 扁平化并去重
+    uniq_vals = np.unique(packed.reshape(-1))
+
+    # 拆回三元组
+    colors = [
+        ((val >> 16) & 0xFF,
+         (val >> 8) & 0xFF,
+         val & 0xFF)
+        for val in uniq_vals
+    ]
+    return colors

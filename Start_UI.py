@@ -2,13 +2,20 @@
 
 # 忽略版本不一致导致的报错
 import warnings
+import faulthandler
+import time
+
+import numpy as np
+from PyQt5.QtGui import QPainter, QImage, QPixmap, QTextTableFormat, QTextCharFormat, QColor, QTextDocument, \
+    QTextCursor, QFont
+from osgeo import gdal, osr
 
 warnings.filterwarnings("ignore", category=DeprecationWarning, message=".*sipPyTypeDict.*")
 
 # 导入需要的库
 import traceback
 from Windows.MainFrame import Ui_MainWindow
-from WindowClass import * # 导入封装好的窗口
+from WindowClass import *  # 导入封装好的窗口
 import sys
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QFileDialog, QMessageBox,
@@ -32,18 +39,51 @@ class MainWin(QMainWindow, Ui_MainWindow):
         # 缓存两个窗口和元数据信息
         self.cls_window = None
         self.info_win = None
+        # 显示图像的属性
+        self.overlayToggle.setChecked(False)
+        self.current_pixmap = None  # 缓存底图
+        self.overlay_data = None  # 缓存掩膜 RGBA 数组
+        self.overlay_opacity = 0.6  # 初始化不透明度
+        self.ShowSlider.setRange(0, 100)
+        self.ShowSlider.setValue(int(self.overlay_opacity * 100))
+        # 色彩索引表
+        self.color_names = {
+            (31, 119, 180): "水体",
+            (44, 160, 44): "森林",
+            (127, 127, 127): "城市",
+            (140, 86, 74): "农田",
+            (148, 103, 189): "草地",
+            (152, 223, 138): "灌木",
+            (174, 199, 232): "冰川",
+            (196, 156, 148): "沙漠",
+            (197, 176, 213): "湿地",
+            (214, 39, 40): "建筑",
+            (227, 119, 194): "道路",
+            (247, 182, 210): "裸地",
+            (255, 127, 14): "工业区",
+            (255, 152, 150): "居民区",
+            (255, 187, 120): "其他"
+        }
 
     # 监听事件都放在这里面
     def controller(self):
-        self.open_action.triggered.connect(self.on_open)
+        self.open_action.triggered.connect(self.on_open) # 打开影像
+        # 打开子窗口
         self.clsaction.triggered.connect(self.Open_ClcWindow)
         self.ImgInfo_action.triggered.connect(self.show_info)
-        self.testButton.clicked.connect(self.on_open)
+        # 控制掩膜影像的显示
+        self.overlayToggle.toggled.connect(self.toggle_overlay)
+        self.ClsresultButton.clicked.connect(self.open_overlay)
+        self.ShowSlider.valueChanged.connect(self.change_opacity)
+
+        # 测试按钮
+        self.testButton.clicked.connect(self.open_overlay)
 
     def on_open(self):
         """打开遥感影像文件"""
-        fp, _ = QFileDialog.getOpenFileName(self, "打开遥感影像", "",
-                                            "影像(*.tif *.tiff *.img);;所有(*.*)")
+        # fp, _ = QFileDialog.getOpenFileName(self, "打开遥感影像", "",
+        #                                     "影像(*.tif *.tiff *.img);;所有(*.*)")
+        fp = r"E:\a_GUIRS_资料\JezeroCrater.tif";
         if not fp: return
         try:
             self.ds, self.intrinsic, self.proj, self.bands = img_utils.load_image_all(fp, parent=self)
@@ -52,10 +92,140 @@ class MainWin(QMainWindow, Ui_MainWindow):
             return
         # 显示第一波段
         pix = img_utils.make_pixmap_from_band(self.bands[1],
-                                                  self.imglabel.width(),
-                                                  self.imglabel.height())
+                                              self.imglabel.width(),
+                                              self.imglabel.height())
+        self.current_pixmap = pix
         self.imglabel.setPixmap(pix)
         self.statusBar().showMessage(f"已加载 {fp}")
+
+    def open_overlay(self):
+        """打开图斑影像（栅格掩膜）"""
+        # fp, _ = QFileDialog.getOpenFileName(
+        #     self, "打开图斑影像", "",
+        #     "图斑影像 (*.png);;所有文件 (*.*)"
+        # )
+        fp = r"E:\a_GUIRS_资料\pro_results_MRFmap_superpixelsize65_K3976_M0.2_sigma5.png"
+        if not fp:
+            return
+        try:
+            # 叠加显示
+            if self.current_pixmap is None:
+                QMessageBox.warning(self, "提示", "请打开原始的遥感影像")
+                return
+
+            # 使用上下文管理器确保资源释放
+            ds = gdal.Open(fp, gdal.GA_ReadOnly)
+            if ds is None:
+                QMessageBox.critical(self, "错误", "无法打开掩膜影像")
+                return
+            else:
+                h_mask, w_mask = ds.RasterXSize, ds.RasterYSize
+                h_raw, w_raw = self.ds.RasterXSize, self.ds.RasterYSize
+                if h_mask != h_raw or w_mask != w_raw:
+                    QMessageBox.critical(self, "错误", "打开掩膜影像与遥感影像尺寸不一致")
+                    return
+
+            # 读取掩膜前3个波段
+            bands = []
+            for i in range(1, 4):
+                band = ds.GetRasterBand(i)
+                arr = band.ReadAsArray()
+                if arr is None:
+                    QMessageBox.critical(self, "错误", f"无法读取波段 {i}")
+                    return
+                bands.append(arr.astype(np.uint8))
+
+            rgb = np.dstack(bands[:3])  # RGB通道
+            self.overlay_data = rgb
+            # 叠加显示
+            self.repaint_overlay()
+            # 改变radioButton的状态
+            self.overlayToggle.setChecked(True)
+            # 获取颜色索引并与地貌对应
+            unique_colors = img_utils.get_unique_colors(rgb)
+
+            html = '<h3></h3>'
+            html += '<table cellspacing="2" cellpadding="2">'
+            for color in unique_colors:
+                r, g, b = int(color[0]), int(color[1]), int(color[2])
+                color_tuple = (r, g, b)
+                color_name = self.color_names.get(color_tuple, "未命名类别")
+                hexcol = f'#{r:02X}{g:02X}{b:02X}'
+                html += (
+                    '<tr>'
+                    f'  <td bgcolor="{hexcol}" width="16" height="16"></td>'
+                    f'  <td style="padding-left: 8px;">{color_name}</td>'
+                    '</tr>'
+                )
+            html += '</table>'
+
+            self.legend.setAcceptRichText(True)
+            self.legend.setHtml(html)
+
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"处理掩膜时出错: {str(e)}")
+        finally:
+            # 显式释放GDAL数据集
+            ds = None
+
+    def toggle_overlay(self, checked: bool):
+        """
+        判断是否显示掩膜
+        """
+        if checked:
+            # 勾选时，如果准备好掩膜数据就叠加；否则提示
+            if self.current_pixmap is not None and getattr(self, 'overlay_data', None) is not None:
+                self.repaint_overlay()
+            else:
+                QMessageBox.information(self, "提示", "请先加载掩膜影像")
+                # 取消勾选
+                self.overlayToggle.setChecked(False)
+        else:
+            # 取消勾选时，直接恢复只显示底图
+            if self.current_pixmap is not None:
+                self.imglabel.setPixmap(self.current_pixmap)
+
+    def change_opacity(self, value):
+        """
+        slider 的 value 范围 0–100，转换成 0.0–1.0
+        并重新绘制 overlay
+        """
+        self.overlay_opacity = value / 100.0
+        # 如果已经有底图和掩膜，就重画一次
+        if self.overlayToggle.isChecked() and getattr(self, 'overlay_data', None) is not None:
+            self.repaint_overlay()
+
+    def repaint_overlay(self):
+        """在底图上叠加半透明掩膜并显示"""
+        base = QPixmap(self.current_pixmap)  # 复制底图
+        painter = QPainter(base)
+        try:
+            # 创建掩膜图像
+            h, w, _ = self.overlay_data.shape
+            data = np.ascontiguousarray(self.overlay_data)
+            bytes_per_line = 3 * w
+            mask_img = QImage(data.data, w, h, bytes_per_line, QImage.Format_RGB888)
+            # 创建掩膜QPixmap
+            mask_pix = QPixmap.fromImage(mask_img)
+            # 缩放掩膜到底图大小（不保持宽高比）
+            target_size = base.size()
+            scaled_mask = mask_pix.scaled(
+                target_size,
+                Qt.IgnoreAspectRatio,  # 不保持宽高比
+                Qt.SmoothTransformation
+            )
+            # 设置半透明绘制
+            painter.setOpacity(self.overlay_opacity)
+            # 绘制到整个底图区域
+            painter.drawPixmap(0, 0, scaled_mask)
+
+        except Exception as e:
+            print("Overlay 绘制失败：", e)
+
+        finally:
+            painter.end()
+
+        self.imglabel.setPixmap(base)
 
     def show_info(self):
         """打开 Info 窗口，把 intrinsic 显示到 InfoTab1，把 proj 显示到 InfoTab2"""
@@ -66,26 +236,19 @@ class MainWin(QMainWindow, Ui_MainWindow):
         InfoTab1, InfoTab2 = self.info_win.InfoTab1, self.info_win.InfoTab2
 
         # 填 InfoTab1
-        InfoTab1.clear()
-        InfoTab1.setRowCount(len(self.intrinsic))
-        InfoTab1.setColumnCount(2)
-        InfoTab1.setHorizontalHeaderLabels(["属性", "值"])
-        for i, (k, v) in enumerate(self.intrinsic.items()):
-            InfoTab1.setItem(i, 0, QTableWidgetItem(k))
-            InfoTab1.setItem(i, 1, QTableWidgetItem(str(v)))
-        InfoTab1.resizeColumnsToContents()
+        for row, key in enumerate(self.info_win.intrinsic_keys):
+            val = self.intrinsic.get(key, "")
+            InfoTab1.setItem(row, 1, QTableWidgetItem(str(val)))
 
         # 填 InfoTab2
-        InfoTab2.clear()
-        InfoTab2.setRowCount(len(self.proj))
-        InfoTab2.setColumnCount(2)
-        InfoTab2.setHorizontalHeaderLabels(["参数", "数值"])
-        for i, (k, v) in enumerate(self.proj.items()):
-            InfoTab2.setItem(i, 0, QTableWidgetItem(k))
-            InfoTab2.setItem(i, 1, QTableWidgetItem(str(v)))
-        InfoTab2.resizeColumnsToContents()
+        for row, key in enumerate(self.info_win.proj_keys):
+            val = self.proj.get(key, "")
+            InfoTab2.setItem(row, 1, QTableWidgetItem(str(val)))
 
-        self.info_win.show()
+        if self.info_win.isMinimized():
+            self.info_win.showNormal()
+        else:
+            self.info_win.show()
         self.info_win.activateWindow()
 
     def Open_ClcWindow(self):
@@ -154,6 +317,8 @@ def my_excepthook(exc_type, exc_value, exc_tb):
 
 # 把默认的钩子替换掉
 sys.excepthook = my_excepthook
+# 输出底层出现问题时候报错
+faulthandler.enable(all_threads=True)
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)  # application 对象
