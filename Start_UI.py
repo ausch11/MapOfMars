@@ -3,12 +3,8 @@
 # 忽略版本不一致导致的报错
 import warnings
 import faulthandler
-import time
 
-import numpy as np
-from PyQt5.QtGui import QPainter, QImage, QPixmap, QTextTableFormat, QTextCharFormat, QColor, QTextDocument, \
-    QTextCursor, QFont
-from osgeo import gdal, osr
+from PyQt5.QtGui import QPainter
 
 warnings.filterwarnings("ignore", category=DeprecationWarning, message=".*sipPyTypeDict.*")
 
@@ -18,8 +14,8 @@ from Windows.MainFrame import Ui_MainWindow
 from WindowClass import *  # 导入封装好的窗口
 import sys
 from PyQt5.QtWidgets import (
-    QApplication, QMainWindow, QFileDialog, QMessageBox,
-    QTabWidget, QTableWidgetItem
+    QApplication, QMainWindow, QMessageBox,
+    QTableWidgetItem
 )
 from PyQt5.QtCore import Qt
 import img_utils
@@ -32,6 +28,7 @@ class MainWin(QMainWindow, Ui_MainWindow):
         # 调用监听函数
         self.controller()
         # 初始化变量
+        self.openpath = None
         self.ds = None
         self.intrinsic = {}
         self.proj = {}
@@ -41,6 +38,7 @@ class MainWin(QMainWindow, Ui_MainWindow):
         self.info_win = None
         # 显示图像的属性
         self.overlayToggle.setChecked(False)
+        self.base_pixmap = None  # 原始底图
         self.current_pixmap = None  # 缓存底图
         self.overlay_data = None  # 缓存掩膜 RGBA 数组
         self.overlay_opacity = 0.6  # 初始化不透明度
@@ -65,6 +63,7 @@ class MainWin(QMainWindow, Ui_MainWindow):
             (255, 187, 120): "其他"
         }
 
+
     # 监听事件都放在这里面
     def controller(self):
         self.open_action.triggered.connect(self.on_open) # 打开影像
@@ -79,11 +78,48 @@ class MainWin(QMainWindow, Ui_MainWindow):
         # 测试按钮
         self.testButton.clicked.connect(self.open_overlay)
 
+    def update_progress(self, percent: int):
+        """把 slic_map 传来的进度值更新到 GUI"""
+        self.progressBar.setValue(percent)
+
+    def handle_new_overlay(self, rgb_array: np.ndarray):
+        """
+        供 slic_map 调用，把新的掩膜数组设置到主窗口，
+        然后立刻重绘 overlay（保留当前 transform）。
+        """
+        self.overlay_data = rgb_array
+        # 获取颜色索引并与地貌对应
+        unique_colors = img_utils.get_unique_colors(rgb_array)
+        html = '<h3></h3>'
+        html += '<table cellspacing="2" cellpadding="2">'
+        for color in unique_colors:
+            r, g, b = int(color[0]), int(color[1]), int(color[2])
+            color_tuple = (r, g, b)
+            color_name = self.color_names.get(color_tuple, "未命名类别")
+            hexcol = f'#{r:02X}{g:02X}{b:02X}'
+            html += (
+                '<tr>'
+                f'  <td bgcolor="{hexcol}" width="16" height="16"></td>'
+                f'  <td style="padding-left: 8px;">{color_name}</td>'
+                '</tr>'
+            )
+        html += '</table>'
+
+        self.legend.setAcceptRichText(True)
+        self.legend.setHtml(html)
+        # 如果 toggle 已选中，或者你想每次都显示：
+        if not self.overlayToggle.isChecked():
+            self.overlayToggle.setChecked(True)
+            self.repaint_overlay()
+        else:
+            self.repaint_overlay()
+
     def on_open(self):
         """打开遥感影像文件"""
         # fp, _ = QFileDialog.getOpenFileName(self, "打开遥感影像", "",
         #                                     "影像(*.tif *.tiff *.img);;所有(*.*)")
         fp = r"E:\a_GUIRS_资料\JezeroCrater.tif";
+        self.openpath = fp
         if not fp: return
         try:
             self.ds, self.intrinsic, self.proj, self.bands = img_utils.load_image_all(fp, parent=self)
@@ -92,10 +128,11 @@ class MainWin(QMainWindow, Ui_MainWindow):
             return
         # 显示第一波段
         pix = img_utils.make_pixmap_from_band(self.bands[1],
-                                              self.imglabel.width(),
-                                              self.imglabel.height())
+                                              self.ImageView.width(),
+                                              self.ImageView.height())
+        self.base_pixmap = pix
         self.current_pixmap = pix
-        self.imglabel.setPixmap(pix)
+        self.ImageView.loadPixmap(pix)
         self.statusBar().showMessage(f"已加载 {fp}")
 
     def open_overlay(self):
@@ -141,9 +178,9 @@ class MainWin(QMainWindow, Ui_MainWindow):
             self.repaint_overlay()
             # 改变radioButton的状态
             self.overlayToggle.setChecked(True)
+
             # 获取颜色索引并与地貌对应
             unique_colors = img_utils.get_unique_colors(rgb)
-
             html = '<h3></h3>'
             html += '<table cellspacing="2" cellpadding="2">'
             for color in unique_colors:
@@ -168,36 +205,37 @@ class MainWin(QMainWindow, Ui_MainWindow):
             # 显式释放GDAL数据集
             ds = None
 
-    def toggle_overlay(self, checked: bool):
-        """
-        判断是否显示掩膜
-        """
-        if checked:
-            # 勾选时，如果准备好掩膜数据就叠加；否则提示
-            if self.current_pixmap is not None and getattr(self, 'overlay_data', None) is not None:
-                self.repaint_overlay()
-            else:
-                QMessageBox.information(self, "提示", "请先加载掩膜影像")
-                # 取消勾选
-                self.overlayToggle.setChecked(False)
-        else:
-            # 取消勾选时，直接恢复只显示底图
-            if self.current_pixmap is not None:
-                self.imglabel.setPixmap(self.current_pixmap)
-
     def change_opacity(self, value):
         """
-        slider 的 value 范围 0–100，转换成 0.0–1.0
-        并重新绘制 overlay
+        根据slider设置透明度，重新绘制 overlay
         """
         self.overlay_opacity = value / 100.0
         # 如果已经有底图和掩膜，就重画一次
         if self.overlayToggle.isChecked() and getattr(self, 'overlay_data', None) is not None:
             self.repaint_overlay()
 
+    def toggle_overlay(self, checked: bool):
+        """
+        判断是否显示掩膜
+        """
+        if checked:
+            if checked:
+                if self.overlay_data is None:
+                    QMessageBox.information(self, "提示", "请先加载掩膜影像")
+                    self.overlayToggle.setChecked(False)
+                    return
+                # 基于 base_pixmap 重新叠加
+                self.repaint_overlay()
+        else:
+            iv = self.ImageView
+            if hasattr(iv, 'pixItem'):
+                iv.pixItem.setPixmap(self.base_pixmap)
+            # current_pixmap 也重置为底图
+            self.current_pixmap = self.base_pixmap
+
     def repaint_overlay(self):
         """在底图上叠加半透明掩膜并显示"""
-        base = QPixmap(self.current_pixmap)  # 复制底图
+        base = QPixmap(self.base_pixmap)  # 复制底图
         painter = QPainter(base)
         try:
             # 创建掩膜图像
@@ -206,18 +244,15 @@ class MainWin(QMainWindow, Ui_MainWindow):
             bytes_per_line = 3 * w
             mask_img = QImage(data.data, w, h, bytes_per_line, QImage.Format_RGB888)
             # 创建掩膜QPixmap
-            mask_pix = QPixmap.fromImage(mask_img)
-            # 缩放掩膜到底图大小（不保持宽高比）
-            target_size = base.size()
-            scaled_mask = mask_pix.scaled(
-                target_size,
-                Qt.IgnoreAspectRatio,  # 不保持宽高比
+            mask_pix = QPixmap.fromImage(mask_img).scaled(
+                base.size(),
+                Qt.IgnoreAspectRatio,
                 Qt.SmoothTransformation
             )
             # 设置半透明绘制
             painter.setOpacity(self.overlay_opacity)
             # 绘制到整个底图区域
-            painter.drawPixmap(0, 0, scaled_mask)
+            painter.drawPixmap(0, 0, mask_pix)
 
         except Exception as e:
             print("Overlay 绘制失败：", e)
@@ -225,7 +260,13 @@ class MainWin(QMainWindow, Ui_MainWindow):
         finally:
             painter.end()
 
-        self.imglabel.setPixmap(base)
+        iv = self.ImageView
+        if hasattr(iv, 'pixItem'):
+            iv.pixItem.setPixmap(base)
+        else:
+            iv.loadPixmap(base)
+
+        self.current_pixmap = base
 
     def show_info(self):
         """打开 Info 窗口，把 intrinsic 显示到 InfoTab1，把 proj 显示到 InfoTab2"""

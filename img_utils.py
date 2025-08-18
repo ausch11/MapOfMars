@@ -1,10 +1,15 @@
 # img_utils.py
-import os
+from __future__ import annotations
+
+
 import numpy as np
 from osgeo import gdal, osr
 from PyQt5.QtGui import QImage, QPixmap
-from PyQt5.QtWidgets import QMessageBox
-from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import QMessageBox, QLineEdit
+from PyQt5.QtCore import Qt,pyqtSignal, QObject
+import threading
+from typing import Callable, Optional
+
 
 
 def read_dataset(path, parent=None):
@@ -112,3 +117,96 @@ def get_unique_colors(rgb):
         for val in uniq_vals
     ]
     return colors
+
+def get_numeric_value(line_edit: QLineEdit,
+                      *,
+                      type_: type = int,
+                      empty_msg: str = "请输入一个数字",
+                      error_msg: str = "请输入一个合法的数字") -> int | float | None:
+    """
+    从给定的 QLineEdit 中读取文本并转换为数字。
+    参数：
+        line_edit: 要读取的 QLineEdit 对象
+        type_:     要转换的类型，int 或 float（默认为 int）
+        empty_msg: 如果文本为空时弹出的提示
+        error_msg: 如果转换失败时弹出的提示
+    返回值：
+        成功时返回转换后的数字（int 或 float），失败时返回 None。
+    """
+    text = line_edit.text().strip()
+    if not text:
+        QMessageBox.warning(line_edit, "提示", empty_msg)
+        return None
+    try:
+        value = type_(text)
+    except ValueError:
+        QMessageBox.critical(line_edit, "错误", error_msg)
+        return None
+    return value
+
+
+# 进度条事件的设计
+class ProgressManager:
+    """
+    进度条更新
+    """
+    def __init__(self, callback: Optional[Callable[[int], None]]):
+        self.callback = callback if callback is not None else (lambda p: None)
+        self.lock = threading.Lock()
+        self.completed_fraction = 0.0  # fraction [0,1] already completed from previous subtasks
+        self.current_sub_weight = 0.0
+        self.current_sub_progress = 0.0
+        self._last_reported = -1
+
+    def start_subtask(self, weight: float):
+        """weight: fraction of total (0..1)."""
+        with self.lock:
+            self.current_sub_weight = float(weight)
+            self.current_sub_progress = 0.0
+            self._report_locked()
+
+    def update_subtask(self, sub_frac: float):
+        """sub_frac: 0..1 progress within current subtask."""
+        if sub_frac < 0: sub_frac = 0
+        if sub_frac > 1: sub_frac = 1
+        with self.lock:
+            self.current_sub_progress = sub_frac
+            self._report_locked()
+
+    def finish_subtask(self):
+        with self.lock:
+            # mark subtask done and fold into completed_fraction
+            self.completed_fraction += self.current_sub_weight
+            # clamp numerical issues
+            if self.completed_fraction > 1.0:
+                self.completed_fraction = 1.0
+            self.current_sub_weight = 0.0
+            self.current_sub_progress = 0.0
+            self._report_locked()
+
+    def _report_locked(self):
+        overall_frac = self.completed_fraction + self.current_sub_weight * self.current_sub_progress
+        overall_pct = int(round(overall_frac * 100))
+        if overall_pct != self._last_reported:
+            try:
+                self.callback(overall_pct)
+            except Exception:
+                pass
+            self._last_reported = overall_pct
+
+    def complete(self):
+        """force to 100%"""
+        with self.lock:
+            self.completed_fraction = 1.0
+            self.current_sub_weight = 0.0
+            self.current_sub_progress = 1.0
+            self._report_locked()
+
+
+class ProgressSignals(QObject):
+    progress_updated = pyqtSignal(int)  # 进度更新信号 (0-100)
+    result_ready = pyqtSignal(np.ndarray)  # 分类结果信号
+    error_occurred = pyqtSignal(str)  # 错误信号
+    task_completed = pyqtSignal()  # 任务完成信号
+
+

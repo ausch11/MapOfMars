@@ -18,41 +18,13 @@
     <normaloff>D:/同济大学-logo-2048px.ico</normaloff>D:/同济大学-logo-2048px.ico</iconset>
   </property>
   <widget class="QWidget" name="centralwidget">
-   <widget class="QLabel" name="imglabel">
-    <property name="geometry">
-     <rect>
-      <x>20</x>
-      <y>20</y>
-      <width>641</width>
-      <height>471</height>
-     </rect>
-    </property>
-    <property name="cursor">
-     <cursorShape>ArrowCursor</cursorShape>
-    </property>
-    <property name="frameShape">
-     <enum>QFrame::Box</enum>
-    </property>
-    <property name="frameShadow">
-     <enum>QFrame::Sunken</enum>
-    </property>
-    <property name="text">
-     <string>Image</string>
-    </property>
-    <property name="textFormat">
-     <enum>Qt::AutoText</enum>
-    </property>
-    <property name="alignment">
-     <set>Qt::AlignCenter</set>
-    </property>
-   </widget>
    <widget class="QTextEdit" name="legend">
     <property name="geometry">
      <rect>
       <x>670</x>
-      <y>50</y>
+      <y>30</y>
       <width>131</width>
-      <height>491</height>
+      <height>511</height>
      </rect>
     </property>
     <property name="cursor" stdset="0">
@@ -131,7 +103,7 @@
     <property name="geometry">
      <rect>
       <x>670</x>
-      <y>20</y>
+      <y>10</y>
       <width>131</width>
       <height>21</height>
      </rect>
@@ -179,6 +151,29 @@
      <string>PushButton</string>
     </property>
    </widget>
+   <widget class="ImageView" name="ImageView">
+    <property name="geometry">
+     <rect>
+      <x>10</x>
+      <y>20</y>
+      <width>651</width>
+      <height>481</height>
+     </rect>
+    </property>
+   </widget>
+   <widget class="QProgressBar" name="progressBar">
+    <property name="geometry">
+     <rect>
+      <x>630</x>
+      <y>550</y>
+      <width>161</width>
+      <height>20</height>
+     </rect>
+    </property>
+    <property name="value">
+     <number>0</number>
+    </property>
+   </widget>
   </widget>
   <widget class="QMenuBar" name="menubar">
    <property name="geometry">
@@ -186,7 +181,7 @@
      <x>0</x>
      <y>0</y>
      <width>820</width>
-     <height>26</height>
+     <height>22</height>
     </rect>
    </property>
    <widget class="QMenu" name="menu">
@@ -222,6 +217,13 @@
    </property>
   </action>
  </widget>
+ <customwidgets>
+  <customwidget>
+   <class>ImageView</class>
+   <extends>QGraphicsView</extends>
+   <header location="global">GeoImageViewer</header>
+  </customwidget>
+ </customwidgets>
  <resources/>
  <connections/>
 </ui>
