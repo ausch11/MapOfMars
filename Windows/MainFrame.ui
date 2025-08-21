@@ -24,7 +24,7 @@
       <x>670</x>
       <y>30</y>
       <width>131</width>
-      <height>511</height>
+      <height>471</height>
      </rect>
     </property>
     <property name="cursor" stdset="0">
@@ -138,19 +138,6 @@
      <enum>Qt::Horizontal</enum>
     </property>
    </widget>
-   <widget class="QPushButton" name="testButton">
-    <property name="geometry">
-     <rect>
-      <x>690</x>
-      <y>500</y>
-      <width>93</width>
-      <height>28</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>PushButton</string>
-    </property>
-   </widget>
    <widget class="ImageView" name="ImageView">
     <property name="geometry">
      <rect>
@@ -164,9 +151,9 @@
    <widget class="QProgressBar" name="progressBar">
     <property name="geometry">
      <rect>
-      <x>630</x>
-      <y>550</y>
-      <width>161</width>
+      <x>670</x>
+      <y>520</y>
+      <width>141</width>
       <height>20</height>
      </rect>
     </property>
@@ -181,7 +168,7 @@
      <x>0</x>
      <y>0</y>
      <width>820</width>
-     <height>22</height>
+     <height>26</height>
     </rect>
    </property>
    <widget class="QMenu" name="menu">

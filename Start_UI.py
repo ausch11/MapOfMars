@@ -17,11 +17,14 @@ from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QMessageBox,
     QTableWidgetItem
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt,pyqtSignal
 import img_utils
 
 
 class MainWin(QMainWindow, Ui_MainWindow):
+    # 定义自定义信号
+    classification_progress = pyqtSignal(int)  # 进度更新信号
+    classification_result = pyqtSignal(object)  # 分类结果信号
     def __init__(self):
         super(MainWin, self).__init__()
         self.setupUi(self)
@@ -46,21 +49,21 @@ class MainWin(QMainWindow, Ui_MainWindow):
         self.ShowSlider.setValue(int(self.overlay_opacity * 100))
         # 色彩索引表
         self.color_names = {
-            (31, 119, 180): "水体",
-            (44, 160, 44): "森林",
-            (127, 127, 127): "城市",
-            (140, 86, 74): "农田",
-            (148, 103, 189): "草地",
-            (152, 223, 138): "灌木",
-            (174, 199, 232): "冰川",
-            (196, 156, 148): "沙漠",
-            (197, 176, 213): "湿地",
-            (214, 39, 40): "建筑",
-            (227, 119, 194): "道路",
-            (247, 182, 210): "裸地",
-            (255, 127, 14): "工业区",
-            (255, 152, 150): "居民区",
-            (255, 187, 120): "其他"
+            (31, 119, 180): "曲线型沙丘",
+            (44, 160, 44): "斜坡条纹",
+            (127, 127, 127): "纹理",
+            (140, 86, 74): "粗糙",
+            (148, 103, 189): "混合",
+            (152, 223, 138): "沟槽",
+            (174, 199, 232): "直线型沙丘",
+            (196, 156, 148): "土丘",
+            (197, 176, 213): "山脊",
+            (214, 39, 40): "冲沟",
+            (227, 119, 194): "撞击坑群",
+            (247, 182, 210): "光滑形貌",
+            (255, 127, 14): "悬崖",
+            (255, 152, 150): "滑坡",
+            (255, 187, 120): "撞击坑"
         }
 
 
@@ -74,9 +77,9 @@ class MainWin(QMainWindow, Ui_MainWindow):
         self.overlayToggle.toggled.connect(self.toggle_overlay)
         self.ClsresultButton.clicked.connect(self.open_overlay)
         self.ShowSlider.valueChanged.connect(self.change_opacity)
-
-        # 测试按钮
-        self.testButton.clicked.connect(self.open_overlay)
+        # 多线程信号（进度条、显示图像）
+        self.classification_progress.connect(self.update_progress)
+        self.classification_result.connect(self.handle_new_overlay)
 
     def update_progress(self, percent: int):
         """把 slic_map 传来的进度值更新到 GUI"""
@@ -179,22 +182,26 @@ class MainWin(QMainWindow, Ui_MainWindow):
             # 改变radioButton的状态
             self.overlayToggle.setChecked(True)
 
-            # 获取颜色索引并与地貌对应
             unique_colors = img_utils.get_unique_colors(rgb)
-            html = '<h3></h3>'
-            html += '<table cellspacing="2" cellpadding="2">'
+
+            html = """
+            <table cellspacing="2" cellpadding="2" style="font-family:Arial, sans-serif; font-size:9pt; line-height:1.65; width:1.5;">
+            """
+
             for color in unique_colors:
                 r, g, b = int(color[0]), int(color[1]), int(color[2])
                 color_tuple = (r, g, b)
                 color_name = self.color_names.get(color_tuple, "未命名类别")
                 hexcol = f'#{r:02X}{g:02X}{b:02X}'
-                html += (
-                    '<tr>'
-                    f'  <td bgcolor="{hexcol}" width="16" height="16"></td>'
-                    f'  <td style="padding-left: 8px;">{color_name}</td>'
-                    '</tr>'
-                )
-            html += '</table>'
+
+                html += f"""
+                <tr>
+                  <td style="background-color:{hexcol}; width:40px; height:40px; border:1px solid #000;"></td>
+                  <td style="padding-left:4px;">{color_name}</td>
+                </tr>
+                """
+
+            html += "</table>"
 
             self.legend.setAcceptRichText(True)
             self.legend.setHtml(html)
@@ -296,7 +303,9 @@ class MainWin(QMainWindow, Ui_MainWindow):
         """打开分类窗口，使用单例模式确保只打开一个"""
         if self.cls_window is None:
             # 创建新窗口，并设置主窗口为父对象
-            self.cls_window = ClassWindow(parent=self)
+            self.cls_window = ClassWindow(parent=self,
+                                          progress_signal=self.classification_progress,
+                                          result_signal=self.classification_result)
             # 当窗口关闭时自动清除引用
             self.cls_window.destroyed.connect(lambda: setattr(self, 'cls_window', None))
 

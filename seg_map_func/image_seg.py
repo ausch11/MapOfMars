@@ -21,6 +21,7 @@ import matplotlib as mpl
 from osgeo import gdal
 from numba import jit
 from img_utils import *
+from PyQt5.QtCore import QThread, pyqtSignal
 
 
 def image_patch(img2, slide_window, h, w):
@@ -626,21 +627,21 @@ def slic_map_pipeline(openpath, savepath, ctx_type, superpixelsize, window_size,
     os.makedirs(savepath, exist_ok=True)
 
     custom_colors = [
-        [31 / 255, 119 / 255, 180 / 255],
-        [174 / 255, 199 / 255, 232 / 255],
-        [255 / 255, 127 / 255, 14 / 255],
-        [255 / 255, 187 / 255, 120 / 255],
-        [44 / 255, 160 / 255, 44 / 255],
-        [152 / 255, 223 / 255, 138 / 255],
-        [214 / 255, 39 / 255, 40 / 255],
-        [255 / 255, 152 / 255, 150 / 255],
-        [148 / 255, 103 / 255, 189 / 255],
-        [197 / 255, 176 / 255, 213 / 255],
-        [140 / 255, 86 / 255, 75 / 255],  # 不太一致
-        [196 / 255, 156 / 255, 148 / 255],
-        [227 / 255, 119 / 255, 194 / 255],
-        [247 / 255, 182 / 255, 210 / 255],
-        [127 / 255, 127 / 255, 127 / 255]
+        [31 / 255, 119 / 255, 180 / 255],# 曲线型沙丘
+        [174 / 255, 199 / 255, 232 / 255],# 直线型沙丘
+        [255 / 255, 127 / 255, 14 / 255],# 橙色，悬崖
+        [255 / 255, 187 / 255, 120 / 255],# 撞击坑
+        [44 / 255, 160 / 255, 44 / 255],# 斜坡条纹
+        [152 / 255, 223 / 255, 138 / 255],# 沟槽
+        [214 / 255, 39 / 255, 40 / 255],# 冲沟
+        [255 / 255, 152 / 255, 150 / 255],# 滑坡
+        [148 / 255, 103 / 255, 189 / 255],# 混合
+        [197 / 255, 176 / 255, 213 / 255],# 山脊
+        [140 / 255, 86 / 255, 75 / 255],  # 粗糙# 不太一致
+        [196 / 255, 156 / 255, 148 / 255],# 土丘
+        [227 / 255, 119 / 255, 194 / 255],# 撞击坑群
+        [247 / 255, 182 / 255, 210 / 255],# 光滑形貌
+        [127 / 255, 127 / 255, 127 / 255]# 纹理
     ]
 
     hyper_params = {
@@ -704,7 +705,6 @@ def slic_map_pipeline(openpath, savepath, ctx_type, superpixelsize, window_size,
         os.makedirs(os.path.join(savepath, '切片分类的MRF结果'), exist_ok=True)
         img_cls_pad = np.pad(class_map, ((pad, pad), (pad, pad)), 'symmetric')
         img_mrf_pad = np.pad(mrf_classes, ((pad, pad), (pad, pad)), 'symmetric')
-        print("超像素分类MRF图保存完成")
         for i, region in enumerate(regions):
             cx, cy = region.centroid
             cx, cy = int(cx), int(cy)
@@ -715,7 +715,6 @@ def slic_map_pipeline(openpath, savepath, ctx_type, superpixelsize, window_size,
             temp_mrf = img_mrf_pad[cx_pad - rm:cx_pad + rm + 2, cy_pad - rm:cy_pad + rm + 2]
             plt.imsave(os.path.join(savepath, '切片分类的MRF结果', f'{ctx_type}_{i}.png'), temp_mrf, cmap=cm, vmin=0,
                        vmax=n)
-        print("超像素分类MRF分割结果保存完成")
 
         # Stage 5: finalize saves (already mostly done in apply_mrf_and_save)
         pm.start_subtask(weights['save_finalize'])
@@ -738,49 +737,52 @@ def slic_map_pipeline(openpath, savepath, ctx_type, superpixelsize, window_size,
 
 
 # 多线程运行
-class ProgressSignals(QObject):
+class ClassificationThread(QThread):
+    # 定义所有必要的信号
     progress_updated = pyqtSignal(int)  # 进度更新信号 (0-100)
     result_ready = pyqtSignal(np.ndarray)  # 分类结果信号
     error_occurred = pyqtSignal(str)  # 错误信号
     task_completed = pyqtSignal()  # 任务完成信号
-
-
-class ClassificationThread(threading.Thread):
-    def __init__(self, parent, openpath, savepath, ctx_type, superpixelsize, window_size, M):
+    def __init__(self, openpath, savepath, ctx_type, superpixelsize, window_size, M):
         super().__init__()
-        self.parent = parent  # 子窗口实例
         self.openpath = openpath
         self.savepath = savepath
         self.ctx_type = ctx_type
         self.superpixelsize = superpixelsize
         self.window_size = window_size
         self.M = M
-        self.signals = ProgressSignals()
-        self._stop_event = threading.Event()
+        self._stop_requested = False
+
     def run(self):
         try:
-            # 定义回调函数，将分类结果发送给子窗口
+            # 定义回调函数
+            def progress_callback(progress):
+                # 通过信号发送进度更新
+                self.progress_updated.emit(progress)
+
             def overlay_callback(image_data):
-                self.signals.result_ready.emit(image_data)
+                # 通过信号发送分类结果
+                self.result_ready.emit(image_data)
+
             # 执行分类任务
             slic_map_pipeline(
-                self.openpath,
-                self.savepath,
-                self.ctx_type,
-                self.superpixelsize,
-                self.window_size,
-                self.M,
-                progress_callback=lambda p: self.signals.progress_updated.emit(p),
+                openpath=self.openpath,
+                savepath=self.savepath,
+                ctx_type=self.ctx_type,
+                superpixelsize=self.superpixelsize,
+                window_size=self.window_size,
+                M=self.M,
+                progress_callback=progress_callback,
                 overlay_callback=overlay_callback
             )
 
             # 任务完成信号
-            self.signals.task_completed.emit()
+            self.task_completed.emit()
+
         except Exception as e:
-            self.signals.error_occurred.emit(f"分类错误: {str(e)}")
-    def stop(self):
+            # 发送错误信号
+            self.error_occurred.emit(f"分类错误: {str(e)}")
+
+    def request_stop(self):
         """请求停止任务"""
-        self._stop_event.set()
-    def is_stopped(self):
-        """检查是否已请求停止"""
-        return self._stop_event.is_set()
+        self._stop_requested = True
