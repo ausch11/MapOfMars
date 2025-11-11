@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>325</width>
-    <height>357</height>
+    <width>330</width>
+    <height>405</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -31,7 +31,7 @@
     <property name="geometry">
      <rect>
       <x>110</x>
-      <y>310</y>
+      <y>360</y>
       <width>99</width>
       <height>28</height>
      </rect>
@@ -64,7 +64,7 @@
     <property name="geometry">
      <rect>
       <x>46</x>
-      <y>80</y>
+      <y>130</y>
       <width>91</width>
       <height>18</height>
      </rect>
@@ -77,7 +77,7 @@
     <property name="geometry">
      <rect>
       <x>77</x>
-      <y>130</y>
+      <y>180</y>
       <width>71</width>
       <height>20</height>
      </rect>
@@ -90,7 +90,7 @@
     <property name="geometry">
      <rect>
       <x>31</x>
-      <y>180</y>
+      <y>230</y>
       <width>101</width>
       <height>20</height>
      </rect>
@@ -103,7 +103,7 @@
     <property name="geometry">
      <rect>
       <x>60</x>
-      <y>230</y>
+      <y>280</y>
       <width>71</width>
       <height>20</height>
      </rect>
@@ -116,7 +116,7 @@
     <property name="geometry">
      <rect>
       <x>47</x>
-      <y>260</y>
+      <y>310</y>
       <width>211</width>
       <height>24</height>
      </rect>
@@ -126,7 +126,7 @@
     <property name="geometry">
      <rect>
       <x>264</x>
-      <y>260</y>
+      <y>310</y>
       <width>31</width>
       <height>24</height>
      </rect>
@@ -139,7 +139,7 @@
     <property name="geometry">
      <rect>
       <x>162</x>
-      <y>80</y>
+      <y>130</y>
       <width>131</width>
       <height>24</height>
      </rect>
@@ -152,7 +152,7 @@
     <property name="geometry">
      <rect>
       <x>162</x>
-      <y>130</y>
+      <y>180</y>
       <width>131</width>
       <height>24</height>
      </rect>
@@ -165,7 +165,7 @@
     <property name="geometry">
      <rect>
       <x>162</x>
-      <y>180</y>
+      <y>230</y>
       <width>131</width>
       <height>24</height>
      </rect>
@@ -173,6 +173,79 @@
     <property name="text">
      <string>200</string>
     </property>
+   </widget>
+   <widget class="QLabel" name="label2_2">
+    <property name="geometry">
+     <rect>
+      <x>60</x>
+      <y>80</y>
+      <width>71</width>
+      <height>18</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>基础模型：</string>
+    </property>
+   </widget>
+   <widget class="QComboBox" name="p_netcls">
+    <property name="geometry">
+     <rect>
+      <x>162</x>
+      <y>80</y>
+      <width>131</width>
+      <height>24</height>
+     </rect>
+    </property>
+    <item>
+     <property name="text">
+      <string>DenseNet161</string>
+     </property>
+    </item>
+    <item>
+     <property name="text">
+      <string>EfficientNet-V2</string>
+     </property>
+    </item>
+    <item>
+     <property name="text">
+      <string>Inception-V3</string>
+     </property>
+    </item>
+    <item>
+     <property name="text">
+      <string>ConvNeXt-V2-T</string>
+     </property>
+    </item>
+    <item>
+     <property name="text">
+      <string>MarsMapFormer</string>
+     </property>
+    </item>
+    <item>
+     <property name="text">
+      <string>MViTv2-T</string>
+     </property>
+    </item>
+    <item>
+     <property name="text">
+      <string>PoolFormer-S36</string>
+     </property>
+    </item>
+    <item>
+     <property name="text">
+      <string>ResNet50</string>
+     </property>
+    </item>
+    <item>
+     <property name="text">
+      <string>Swin-T</string>
+     </property>
+    </item>
+    <item>
+     <property name="text">
+      <string>ViT-L</string>
+     </property>
+    </item>
    </widget>
   </widget>
  </widget>

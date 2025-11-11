@@ -151,14 +151,43 @@
    <widget class="QProgressBar" name="progressBar">
     <property name="geometry">
      <rect>
-      <x>670</x>
-      <y>520</y>
+      <x>680</x>
+      <y>545</y>
       <width>141</width>
       <height>20</height>
      </rect>
     </property>
     <property name="value">
      <number>0</number>
+    </property>
+   </widget>
+   <widget class="QLabel" name="label5">
+    <property name="geometry">
+     <rect>
+      <x>620</x>
+      <y>545</y>
+      <width>61</width>
+      <height>21</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>处理进度：</string>
+    </property>
+   </widget>
+   <widget class="QPushButton" name="clos_ovrButton">
+    <property name="geometry">
+     <rect>
+      <x>680</x>
+      <y>510</y>
+      <width>111</width>
+      <height>31</height>
+     </rect>
+    </property>
+    <property name="layoutDirection">
+     <enum>Qt::LeftToRight</enum>
+    </property>
+    <property name="text">
+     <string>关闭掩膜</string>
     </property>
    </widget>
   </widget>
@@ -168,7 +197,7 @@
      <x>0</x>
      <y>0</y>
      <width>820</width>
-     <height>26</height>
+     <height>23</height>
     </rect>
    </property>
    <widget class="QMenu" name="menu">
@@ -177,6 +206,7 @@
     </property>
     <addaction name="open_action"/>
     <addaction name="ImgInfo_action"/>
+    <addaction name="clos_imgaction"/>
    </widget>
    <widget class="QMenu" name="menu_2">
     <property name="title">
@@ -201,6 +231,11 @@
   <action name="ImgInfo_action">
    <property name="text">
     <string>影像信息</string>
+   </property>
+  </action>
+  <action name="clos_imgaction">
+   <property name="text">
+    <string>关闭影像</string>
    </property>
   </action>
  </widget>

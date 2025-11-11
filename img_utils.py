@@ -68,14 +68,20 @@ def read_band_data(dataset):
     return bands
 
 
-def make_pixmap_from_band(arr, width, height):
+def make_pixmap_from_band(arr, width=None, height=None):
     """把单波段 numpy 数组归一化、着色并转换成 QPixmap。"""
     mn, mx = float(arr.min()), float(arr.max())
     stretched = np.clip((arr - mn) / (mx - mn) * 255, 0, 255).astype(np.uint8)
     stretched = np.ascontiguousarray(stretched)
+    # h, w = stretched.shape
+    # qimg = QImage(stretched.data, w, h, w, QImage.Format_Grayscale8)
+    # pix = QPixmap.fromImage(qimg).scaled(width, height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
     h, w = stretched.shape
-    qimg = QImage(stretched.data, w, h, w, QImage.Format_Grayscale8)
-    pix = QPixmap.fromImage(qimg).scaled(width, height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+    bytes_per_line = w  # 灰度每行字节数
+    qimg = QImage(stretched.data, w, h, bytes_per_line, QImage.Format_Grayscale8).copy()
+    # .copy() 确保 QImage 拥有自己的数据副本，避免 numpy 内存生命周期问题
+
+    pix = QPixmap.fromImage(qimg)  # 原始分辨率 pixmap
     return pix
 
 
@@ -144,6 +150,44 @@ def get_numeric_value(line_edit: QLineEdit,
         return None
     return value
 
+
+def generate_color_legend(unique_colors, color_names,color_width=10, color_height=5,
+                          font_size=12, padding_left=4, border_color="#ddd"):
+    """
+    生成颜色图例的HTML代码
+
+    参数:
+    - unique_colors: 颜色列表，每个颜色为(R, G, B)元组
+    - color_names: 颜色名称字典，键为(R, G, B)元组，值为颜色名称
+    - color_width: 色块宽度(像素)
+    - color_height: 色块高度(像素)
+    - font_size: 字体大小(像素)
+    - padding_left: 文本左侧内边距(像素)
+    - border_color: 边框颜色
+
+    返回:
+    - HTML字符串
+    """
+    html = f"""
+    <table cellspacing="0" cellpadding="7" style="font-family:Arial; font-size:9.5pt;">
+    """
+
+    for color in unique_colors:
+        r, g, b = int(color[0]), int(color[1]), int(color[2])
+        color_tuple = (r, g, b)
+        color_name = color_names.get(color_tuple, "未命名类别")
+        hexcol = f'#{r:02X}{g:02X}{b:02X}'
+
+        html += f"""
+        <tr>
+          <td style="background-color:{hexcol}; width:{color_width}px; height:{color_height}px; 
+                   border:1px solid {border_color};"></td>
+          <td style="padding-left:{padding_left}px; font-size:{font_size}px; font-weight:450;">{color_name}</td>
+        </tr>
+        """
+
+    html += "</table>"
+    return html
 
 # 进度条事件的设计
 class ProgressManager:

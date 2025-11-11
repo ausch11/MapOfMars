@@ -15,10 +15,11 @@ from WindowClass import *  # 导入封装好的窗口
 import sys
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QMessageBox,
-    QTableWidgetItem
+    QTableWidgetItem, QLabel
 )
 from PyQt5.QtCore import Qt,pyqtSignal
 import img_utils
+import os
 
 
 class MainWin(QMainWindow, Ui_MainWindow):
@@ -36,6 +37,9 @@ class MainWin(QMainWindow, Ui_MainWindow):
         self.intrinsic = {}
         self.proj = {}
         self.bands = {}
+        self.geotransform = None  # 地理坐标转换相关变量
+        self.projection = None
+        self.coord_label = None  # 状态栏坐标标签
         # 缓存两个窗口和元数据信息
         self.cls_window = None
         self.info_win = None
@@ -47,6 +51,11 @@ class MainWin(QMainWindow, Ui_MainWindow):
         self.overlay_opacity = 0.6  # 初始化不透明度
         self.ShowSlider.setRange(0, 100)
         self.ShowSlider.setValue(int(self.overlay_opacity * 100))
+        # 连接裁切信号
+        self.ImageView.cropped.connect(self.on_cropped)
+        # 初始化状态栏坐标显示
+        self.init_coord_display()
+
         # 色彩索引表
         self.color_names = {
             (31, 119, 180): "曲线型沙丘",
@@ -66,10 +75,10 @@ class MainWin(QMainWindow, Ui_MainWindow):
             (255, 187, 120): "撞击坑"
         }
 
+        # 监听事件都放在这里面
 
-    # 监听事件都放在这里面
     def controller(self):
-        self.open_action.triggered.connect(self.on_open) # 打开影像
+        self.open_action.triggered.connect(self.on_open)  # 打开影像
         # 打开子窗口
         self.clsaction.triggered.connect(self.Open_ClcWindow)
         self.ImgInfo_action.triggered.connect(self.show_info)
@@ -80,6 +89,192 @@ class MainWin(QMainWindow, Ui_MainWindow):
         # 多线程信号（进度条、显示图像）
         self.classification_progress.connect(self.update_progress)
         self.classification_result.connect(self.handle_new_overlay)
+        # 关闭图像or掩膜
+        self.clos_imgaction.triggered.connect(self.close_image)
+        self.clos_ovrButton.clicked.connect(self.close_overlay)
+
+    def init_coord_display(self):
+        """初始化状态栏坐标显示（右侧固定显示），初始隐藏，只有有影像时才显示"""
+        # 创建一个右对齐的 QLabel 放到状态栏的永久区域
+        self.coord_label = QLabel("")
+        self.coord_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        # 可调的最小宽度，保证信息显示完整；按需修改
+        self.coord_label.setMinimumWidth(220)
+        # 给点内边距让文字不贴边
+        self.coord_label.setStyleSheet("padding-right:8px;")
+        # 初始隐藏（未加载影像时不显示）
+        self.coord_label.hide()
+        # 将其添加到状态栏的永久区域（默认会靠右）
+        self.statusBar().addPermanentWidget(self.coord_label, 0)
+
+        # 连接鼠标移动信号（保持你原来的信号连接）
+        self.ImageView.mouseMoveSignal.connect(self.update_coord_display)
+
+    def _ensure_georef(self):
+        """
+        尝试从 self.geotransform/self.projection（优先）或 self.intrinsic/self.proj 中提取地理信息，
+        以避免重复从文件读取。支持常见键名的回退。
+        """
+        # geotransform
+        if self.geotransform is None:
+            # 常见键名回退尝试
+            possible_gt = (
+                self.intrinsic.get('geotransform') if isinstance(self.intrinsic, dict) else None,
+                self.intrinsic.get('GeoTransform') if isinstance(self.intrinsic, dict) else None,
+                self.intrinsic.get('gt') if isinstance(self.intrinsic, dict) else None,
+                self.intrinsic.get('transform') if isinstance(self.intrinsic, dict) else None,
+            )
+            for gt in possible_gt:
+                if gt:
+                    # 有的可能已经是 tuple/list
+                    try:
+                        self.geotransform = tuple(gt)
+                        break
+                    except Exception:
+                        # 如果是单字符串需要解析（不做复杂解析）
+                        pass
+
+        # projection (WKT)
+        if self.projection is None:
+            possible_pr = (
+                self.proj.get('wkt') if isinstance(self.proj, dict) else None,
+                self.proj.get('projection') if isinstance(self.proj, dict) else None,
+                self.proj.get('proj_wkt') if isinstance(self.proj, dict) else None,
+                self.proj.get('wkt_string') if isinstance(self.proj, dict) else None,
+                self.proj.get('WKT') if isinstance(self.proj, dict) else None,
+            )
+            for pr in possible_pr:
+                if pr:
+                    self.projection = pr
+                    break
+
+    def update_coord_display(self, x, y):
+        """更新右侧坐标标签（如果未加载影像则隐藏并返回）"""
+        # 如果没有加载影像（既没有 ds，也没有从 load_image_all 填充的 intrinsic/proj），则隐藏坐标并返回
+        no_image_loaded = (getattr(self, 'ds', None) is None) and (not bool(self.intrinsic))
+        if no_image_loaded:
+            if hasattr(self, "coord_label") and self.coord_label.isVisible():
+                self.coord_label.hide()
+            return
+
+        # 确保在有影像时标签可见
+        if hasattr(self, "coord_label") and not self.coord_label.isVisible():
+            self.coord_label.show()
+
+        # 尝试确保 geotransform / projection 可用（从 intrinsic/proj 回退）
+        self._ensure_georef()
+
+        # 计算地理坐标（如果可以），否则显示像素坐标
+        if getattr(self, "geotransform", None) is not None:
+            gt = self.geotransform
+            try:
+                geo_x = gt[0] + x * gt[1] + y * gt[2]
+                geo_y = gt[3] + x * gt[4] + y * gt[5]
+            except Exception:
+                # 若 geotransform 格式异常，退回显示像素
+                text = f"像素坐标: X: {x:.4f}, Y: {y:.4f}"
+                self.coord_label.setText(text)
+                return
+
+            if getattr(self, "projection", None):
+                try:
+                    source = osr.SpatialReference()
+                    # projection 可能已经是 WKT 字符串或其它
+                    source.ImportFromWkt(self.projection)
+                    target = osr.SpatialReference()
+                    target.ImportFromEPSG(4326)  # WGS84
+                    transform = osr.CoordinateTransformation(source, target)
+                    lon, lat, _ = transform.TransformPoint(geo_x, geo_y)
+                    text = f"经度: {lon:.6f}°, 纬度: {lat:.6f}°"
+                except Exception:
+                    # 投影转换失败时显示投影坐标（地理坐标系下的 X/Y）
+                    text = f"X: {geo_x:.2f}, Y: {geo_y:.2f}"
+            else:
+                text = f"X: {geo_x:.2f}, Y: {geo_y:.2f}"
+        else:
+            # 没有地理参考信息，显示像素坐标（但仅在已加载影像时）
+            text = f"像素坐标: X: {x:.4f}, Y: {y:.4f}"
+
+        # 更新标签文本
+        if hasattr(self, "coord_label") and self.coord_label is not None:
+            self.coord_label.setText(text)
+        else:
+            self.statusBar().showMessage(text)
+
+    def close_image(self):
+        """关闭当前打开的影像"""
+        if self.ds is None:
+            QMessageBox.information(self, "提示", "没有打开的影像")
+            return
+
+        # 确认对话框
+        reply = QMessageBox.question(self, "确认", "确定要关闭当前影像吗？",
+                                     QMessageBox.Yes | QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            # 清除影像相关数据
+            self.openpath = None
+            self.ds = None
+            self.intrinsic = {}
+            self.proj = {}
+            self.bands = {}
+            self.geotransform = None
+            self.projection = None
+
+            # 清除显示
+            self.base_pixmap = None
+            self.current_pixmap = None
+            self.ImageView.scene().clear()
+            self.ImageView._orig_pixmap = None
+            self.ImageView.pixItem = None
+
+            # 清除掩膜数据
+            self.close_overlay(show_message=False)
+
+            # 更新状态栏
+            self.statusBar().showMessage("影像已关闭")
+            self.coord_label.setText("")  # 清空坐标显示
+        else:
+            return
+
+    def close_overlay(self, show_message=True):
+        """关闭当前掩膜，保持当前视图状态"""
+        if self.overlay_data is None:
+            if show_message:
+                QMessageBox.information(self, "提示", "没有打开的掩膜")
+            return
+
+        # 确认对话框
+        if show_message:
+            reply = QMessageBox.question(self, "确认", "确定要关闭当前掩膜吗？",
+                                         QMessageBox.Yes | QMessageBox.No)
+            if reply != QMessageBox.Yes:
+                return
+
+        # 保存当前的视图变换状态
+        current_transform = None
+        if hasattr(self.ImageView, 'transform') and self.ImageView.transform():
+            current_transform = self.ImageView.transform()
+
+        # 清除掩膜数据
+        self.overlay_data = None
+        self.ImageView.set_overlay_data(None)
+
+        # 重置显示，但保持当前视图状态
+        if self.base_pixmap is not None:
+            # 直接设置底图，不调用 loadPixmap
+            if hasattr(self.ImageView, 'pixItem') and self.ImageView.pixItem is not None:
+                self.ImageView.pixItem.setPixmap(self.base_pixmap)
+
+            # 恢复之前的视图变换
+            if current_transform:
+                self.ImageView.setTransform(current_transform)
+
+        # 更新UI状态
+        self.overlayToggle.setChecked(False)
+        self.legend.clear()  # 清除图例
+
+        if show_message:
+            self.statusBar().showMessage("掩膜已关闭")
 
     def update_progress(self, percent: int):
         """把 slic_map 传来的进度值更新到 GUI"""
@@ -93,21 +288,8 @@ class MainWin(QMainWindow, Ui_MainWindow):
         self.overlay_data = rgb_array
         # 获取颜色索引并与地貌对应
         unique_colors = img_utils.get_unique_colors(rgb_array)
-        html = '<h3></h3>'
-        html += '<table cellspacing="2" cellpadding="2">'
-        for color in unique_colors:
-            r, g, b = int(color[0]), int(color[1]), int(color[2])
-            color_tuple = (r, g, b)
-            color_name = self.color_names.get(color_tuple, "未命名类别")
-            hexcol = f'#{r:02X}{g:02X}{b:02X}'
-            html += (
-                '<tr>'
-                f'  <td bgcolor="{hexcol}" width="16" height="16"></td>'
-                f'  <td style="padding-left: 8px;">{color_name}</td>'
-                '</tr>'
-            )
-        html += '</table>'
-
+        # 设置显示掩膜颜色表的格式
+        html = img_utils.generate_color_legend(unique_colors,self.color_names)# 其他设置参数见文档
         self.legend.setAcceptRichText(True)
         self.legend.setHtml(html)
         # 如果 toggle 已选中，或者你想每次都显示：
@@ -130,13 +312,56 @@ class MainWin(QMainWindow, Ui_MainWindow):
             self.statusBar().showMessage(str(e))
             return
         # 显示第一波段
-        pix = img_utils.make_pixmap_from_band(self.bands[1],
-                                              self.ImageView.width(),
-                                              self.ImageView.height())
+        # pix = img_utils.make_pixmap_from_band(self.bands[1],
+        #                                       self.ImageView.width(),
+        #                                       self.ImageView.height())
+        pix = img_utils.make_pixmap_from_band(self.bands[1])
         self.base_pixmap = pix
         self.current_pixmap = pix
         self.ImageView.loadPixmap(pix)
+        # 清空之前的掩膜数据
+        self.ImageView.set_overlay_data(None)
         self.statusBar().showMessage(f"已加载 {fp}")
+
+    def on_cropped(self, orig_image, mask_image, overlay_image, base_name):
+        """处理裁剪结果"""
+        # 选择保存文件夹
+        save_dir = QFileDialog.getExistingDirectory(self, "选择保存文件夹", "")
+        if not save_dir:
+            return
+
+            # 保存原始图像
+        orig_path = os.path.join(save_dir, f"{base_name}_original.png")
+        success_orig = orig_image.save(orig_path)
+
+        # 保存掩膜图像（如果存在）
+        success_mask = True
+        if mask_image is not None:
+            mask_path = os.path.join(save_dir, f"{base_name}_mask.png")
+            success_mask = mask_image.save(mask_path)
+
+        # 保存叠加图像（如果存在）
+        success_overlay = True
+        if overlay_image is not None:
+            overlay_path = os.path.join(save_dir, f"{base_name}_overlay.png")
+            success_overlay = overlay_image.save(overlay_path)
+
+        # 显示保存结果
+        if success_orig and success_mask and success_overlay:
+            QMessageBox.information(self, "保存成功",
+                                    f"已保存到：\n{orig_path}" +
+                                    (f"\n{mask_path}" if mask_image is not None else "") +
+                                    (f"\n{overlay_path}" if overlay_image is not None else ""))
+        else:
+            failed_files = []
+            if not success_orig:
+                failed_files.append(orig_path)
+            if not success_mask and mask_image is not None:
+                failed_files.append(mask_path)
+            if not success_overlay and overlay_image is not None:
+                failed_files.append(overlay_path)
+            QMessageBox.critical(self, "保存失败",
+                                 f"无法保存以下文件：\n" + "\n".join(failed_files))
 
     def open_overlay(self):
         """打开图斑影像（栅格掩膜）"""
@@ -177,6 +402,8 @@ class MainWin(QMainWindow, Ui_MainWindow):
 
             rgb = np.dstack(bands[:3])  # RGB通道
             self.overlay_data = rgb
+            # 将掩膜数据传递给ImageView
+            self.ImageView.set_overlay_data(rgb)
             # 叠加显示
             self.repaint_overlay()
             # 改变radioButton的状态
@@ -184,24 +411,7 @@ class MainWin(QMainWindow, Ui_MainWindow):
 
             unique_colors = img_utils.get_unique_colors(rgb)
 
-            html = """
-            <table cellspacing="2" cellpadding="2" style="font-family:Arial, sans-serif; font-size:9pt; line-height:1.65; width:1.5;">
-            """
-
-            for color in unique_colors:
-                r, g, b = int(color[0]), int(color[1]), int(color[2])
-                color_tuple = (r, g, b)
-                color_name = self.color_names.get(color_tuple, "未命名类别")
-                hexcol = f'#{r:02X}{g:02X}{b:02X}'
-
-                html += f"""
-                <tr>
-                  <td style="background-color:{hexcol}; width:40px; height:40px; border:1px solid #000;"></td>
-                  <td style="padding-left:4px;">{color_name}</td>
-                </tr>
-                """
-
-            html += "</table>"
+            html = img_utils.generate_color_legend(unique_colors,self.color_names)# 其他设置参数见文档
 
             self.legend.setAcceptRichText(True)
             self.legend.setHtml(html)
@@ -226,17 +436,27 @@ class MainWin(QMainWindow, Ui_MainWindow):
         判断是否显示掩膜
         """
         if checked:
-            if checked:
-                if self.overlay_data is None:
-                    QMessageBox.information(self, "提示", "请先加载掩膜影像")
-                    self.overlayToggle.setChecked(False)
-                    return
-                # 基于 base_pixmap 重新叠加
-                self.repaint_overlay()
+            if self.overlay_data is None:
+                QMessageBox.information(self, "提示", "请先加载掩膜影像")
+                self.overlayToggle.setChecked(False)
+                return
+            # 基于 base_pixmap 重新叠加
+            self.repaint_overlay()
         else:
-            iv = self.ImageView
-            if hasattr(iv, 'pixItem'):
-                iv.pixItem.setPixmap(self.base_pixmap)
+            # 保存当前的视图变换状态
+            current_transform = None
+            if hasattr(self.ImageView, 'transform') and self.ImageView.transform():
+                current_transform = self.ImageView.transform()
+
+            # 直接设置底图，不重置视图
+            if hasattr(self.ImageView, 'pixItem') and self.ImageView.pixItem is not None:
+                if self.base_pixmap is not None:
+                    self.ImageView.pixItem.setPixmap(self.base_pixmap)
+
+            # 恢复之前的视图变换
+            if current_transform:
+                self.ImageView.setTransform(current_transform)
+
             # current_pixmap 也重置为底图
             self.current_pixmap = self.base_pixmap
 
