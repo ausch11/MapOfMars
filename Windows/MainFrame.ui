@@ -11,7 +11,7 @@
    </rect>
   </property>
   <property name="windowTitle">
-   <string>火星地貌识别程序</string>
+   <string>MarsMapper V1.0</string>
   </property>
   <property name="windowIcon">
    <iconset>
@@ -210,12 +210,41 @@
    </widget>
    <widget class="QMenu" name="menu_2">
     <property name="title">
-     <string>地貌分类算法</string>
+     <string>分类制图</string>
     </property>
     <addaction name="clsaction"/>
    </widget>
+   <widget class="QMenu" name="menu_3">
+    <property name="title">
+     <string>帮助</string>
+    </property>
+    <addaction name="openhelp_action"/>
+   </widget>
+   <widget class="QMenu" name="menua">
+    <property name="title">
+     <string>图像预处理</string>
+    </property>
+    <addaction name="stretch_action"/>
+   </widget>
+   <widget class="QMenu" name="menu_4">
+    <property name="title">
+     <string>分类后处理</string>
+    </property>
+    <addaction name="mrf_action"/>
+   </widget>
+   <widget class="QMenu" name="menu_5">
+    <property name="title">
+     <string>标注处理</string>
+    </property>
+    <addaction name="sampshow_action"/>
+    <addaction name="actiona"/>
+   </widget>
    <addaction name="menu"/>
+   <addaction name="menua"/>
+   <addaction name="menu_5"/>
    <addaction name="menu_2"/>
+   <addaction name="menu_4"/>
+   <addaction name="menu_3"/>
   </widget>
   <widget class="QStatusBar" name="statusbar"/>
   <action name="open_action">
@@ -225,7 +254,7 @@
   </action>
   <action name="clsaction">
    <property name="text">
-    <string>算法选择</string>
+    <string>超像素分类</string>
    </property>
   </action>
   <action name="ImgInfo_action">
@@ -236,6 +265,31 @@
   <action name="clos_imgaction">
    <property name="text">
     <string>关闭影像</string>
+   </property>
+  </action>
+  <action name="openhelp_action">
+   <property name="text">
+    <string>关于软件</string>
+   </property>
+  </action>
+  <action name="stretch_action">
+   <property name="text">
+    <string>图像拉伸</string>
+   </property>
+  </action>
+  <action name="mrf_action">
+   <property name="text">
+    <string>马尔可夫随机场（MRF）</string>
+   </property>
+  </action>
+  <action name="sampshow_action">
+   <property name="text">
+    <string>样本库显示</string>
+   </property>
+  </action>
+  <action name="actiona">
+   <property name="text">
+    <string>样本标注</string>
    </property>
   </action>
  </widget>

@@ -345,37 +345,6 @@ def generate_patches(img, labelled, regions, pad, rm, superpixelsize_r, savepath
         except Exception as e:
             print(f"删除临时文件时出错: {e}")
 
-# 祝融号着陆区拼接数据需要拉伸处理
-def gray_process(gray, truncated_value=0.5, maxout=255, minout=0):
-    truncated_down = np.percentile(gray, truncated_value)
-    truncated_up = np.percentile(gray, 100 - truncated_value)
-    gray_new = ((maxout - minout) / (truncated_up - truncated_down)) * (gray - truncated_down)
-    gray_new[gray_new < minout] = minout
-    gray_new[gray_new > maxout] = maxout
-    return np.uint8(gray_new)
-
-
-def arr2raster(arr, raster_file, path):
-    """
-    数组生成栅格
-    """
-    example = gdal.Open(path)
-    prj = example.GetProjection()
-    trans = example.GetGeoTransform()
-
-    driver = gdal.GetDriverByName('GTiff')
-    dst_ds = driver.Create(raster_file, arr.shape[1], arr.shape[0], arr.shape[2], gdal.GDT_Byte)
-
-    dst_ds.SetProjection(prj)
-    dst_ds.SetGeoTransform(trans)
-
-    # 将数组的各通道写入图片
-    for b in range(arr.shape[2]):
-        dst_ds.GetRasterBand(b + 1).WriteArray(arr[:, :, b])
-
-    dst_ds.FlushCache()
-    # print("successfully convert array to raster")
-
 
 # 马尔可夫随机场后处理分割的图像
 # 初始版本
@@ -563,12 +532,6 @@ def mrf_kernel(mrf_old, mrf_gamma, neighborhood_size, r0, r1, c0, c1):
 
     return tile
 
-# 执行完整的分割、制图流程
-def preprocess_image(openpath, ctx_type):
-    img = io.imread(openpath)
-    if ctx_type == "ZhuRong":
-        img = gray_process(img)
-    return img
 
 
 # 原始生成代码
@@ -1201,7 +1164,7 @@ def apply_mrf_and_save(segments, regions, scores, num_classes, savepath, openpat
 #     return mrf_classes
 
 
-def slic_map_pipeline(openpath, savepath, ctx_type, superpixelsize, window_size, M,
+def slic_map_pipeline(openpath, savepath, superpixelsize, window_size, M,
                       progress_callback=None, overlay_callback=None,
                       model_spec=None,
                       glcmfeature_mean_path='data/final_mean.npy',
@@ -1251,7 +1214,7 @@ def slic_map_pipeline(openpath, savepath, ctx_type, superpixelsize, window_size,
 
     try:
         pm.start_subtask(weights['preproc_seg'])
-        img = preprocess_image(openpath, ctx_type)
+        img = io.imread(openpath)
         segments, regions, out, labelled = superpixel_segmentation(img, superpixelsize, M, sigmaset, savepath, openpath)
         pm.update_subtask(1.0)
         pm.finish_subtask()
@@ -1451,7 +1414,7 @@ class ClassificationThread(QThread):
     error_occurred   = pyqtSignal(str)              # 错误信号
     task_completed   = pyqtSignal()                 # 任务完成信号
 
-    def __init__(self, openpath, savepath, ctx_type, superpixelsize, window_size, M,
+    def __init__(self, openpath, savepath, superpixelsize, window_size, M,
                  model_spec=None, device='cuda'):
         """
         model_spec: 可选，传入从 MODEL_REGISTRY 获取的 model_spec（mmpretrain 格式）
@@ -1460,7 +1423,6 @@ class ClassificationThread(QThread):
         super().__init__()
         self.openpath = openpath
         self.savepath = savepath
-        self.ctx_type = ctx_type
         self.superpixelsize = superpixelsize
         self.window_size = window_size
         self.M = M
@@ -1483,7 +1445,6 @@ class ClassificationThread(QThread):
             slic_map_pipeline(
                 openpath=self.openpath,
                 savepath=self.savepath,
-                ctx_type=self.ctx_type,
                 superpixelsize=self.superpixelsize,
                 window_size=self.window_size,
                 M=self.M,

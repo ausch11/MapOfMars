@@ -11,7 +11,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning, message=".*sipPyT
 # 导入需要的库
 import traceback
 from Windows.MainFrame import Ui_MainWindow
-from WindowClass import *  # 导入封装好的窗口
+from WindowClass import *
 import sys
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QMessageBox,
@@ -40,9 +40,12 @@ class MainWin(QMainWindow, Ui_MainWindow):
         self.geotransform = None  # 地理坐标转换相关变量
         self.projection = None
         self.coord_label = None  # 状态栏坐标标签
-        # 缓存两个窗口和元数据信息
-        self.cls_window = None
+        # 帮助窗口实现实例
+        self.cls_win = None
         self.info_win = None
+        self.help_win= None
+        self.preproc_win = None
+        self.sampshow_win = None
         # 显示图像的属性
         self.overlayToggle.setChecked(False)
         self.base_pixmap = None  # 原始底图
@@ -68,11 +71,11 @@ class MainWin(QMainWindow, Ui_MainWindow):
             (196, 156, 148): "土丘",
             (197, 176, 213): "山脊",
             (214, 39, 40): "冲沟",
-            (227, 119, 194): "撞击坑群",
-            (247, 182, 210): "光滑形貌",
+            (227, 119, 194): "陨石坑群",
+            (247, 182, 210): "光滑",
             (255, 127, 14): "悬崖",
             (255, 152, 150): "滑坡",
-            (255, 187, 120): "撞击坑"
+            (255, 187, 120): "陨石坑"
         }
 
         # 监听事件都放在这里面
@@ -82,6 +85,9 @@ class MainWin(QMainWindow, Ui_MainWindow):
         # 打开子窗口
         self.clsaction.triggered.connect(self.Open_ClcWindow)
         self.ImgInfo_action.triggered.connect(self.show_info)
+        self.openhelp_action.triggered.connect(self.Open_helpwindow)
+        self.stretch_action.triggered.connect(self.Open_preprocwindow)
+        self.sampshow_action.triggered.connect(self.Open_sampshowwindow)
         # 控制掩膜影像的显示
         self.overlayToggle.toggled.connect(self.toggle_overlay)
         self.ClsresultButton.clicked.connect(self.open_overlay)
@@ -521,18 +527,18 @@ class MainWin(QMainWindow, Ui_MainWindow):
 
     def Open_ClcWindow(self):
         """打开分类窗口，使用单例模式确保只打开一个"""
-        if self.cls_window is None:
+        if self.cls_win is None:
             # 创建新窗口，并设置主窗口为父对象
-            self.cls_window = ClassWindow(parent=self,
+            self.cls_win = ClassWindow(parent=self,
                                           progress_signal=self.classification_progress,
                                           result_signal=self.classification_result)
             # 当窗口关闭时自动清除引用
-            self.cls_window.destroyed.connect(lambda: setattr(self, 'cls_window', None))
+            self.cls_win.destroyed.connect(lambda: setattr(self, 'cls_window', None))
 
         # 设置为模态窗口
-        self.cls_window.setWindowModality(Qt.ApplicationModal)
-        self.cls_window.show()
-        self.cls_window.activateWindow()
+        self.cls_win.setWindowModality(Qt.ApplicationModal)
+        self.cls_win.show()
+        self.cls_win.activateWindow()
 
     def open_ImgInfoWindow(self):
         if self.imginfo_window is None:
@@ -572,6 +578,45 @@ class MainWin(QMainWindow, Ui_MainWindow):
         else:
             self.imginfo_window.show()
         self.imginfo_window.activateWindow()
+
+    def Open_helpwindow(self):
+        """打开帮助窗口，使用单例模式确保只打开一个"""
+        if self.help_win is None:
+            # 创建新窗口，并设置主窗口为父对象
+            self.help_win = HelpWindow(parent=self)
+            # 当窗口关闭时自动清除引用
+            self.help_win.destroyed.connect(lambda: setattr(self, 'help_win', None))
+
+        # 设置为模态窗口
+        self.help_win.setWindowModality(Qt.ApplicationModal)
+        self.help_win.show()
+        self.help_win.activateWindow()
+
+    def Open_preprocwindow(self):
+        """打开预处理窗口，使用单例模式确保只打开一个"""
+        if self.preproc_win is None:
+            # 创建新窗口，并设置主窗口为父对象
+            self.preproc_win = PreProcWindow(parent=self)
+            # 当窗口关闭时自动清除引用
+            self.preproc_win.destroyed.connect(lambda: setattr(self, 'preproc_win', None))
+
+        # 设置为模态窗口
+        self.preproc_win.setWindowModality(Qt.ApplicationModal)
+        self.preproc_win.show()
+        self.preproc_win.activateWindow()
+
+    def Open_sampshowwindow(self):
+        """打开样本显示窗口，使用单例模式确保只打开一个"""
+        if self.sampshow_win is None:
+            # 创建新窗口，并设置主窗口为父对象
+            self.sampshow_win = SampShowWindow(parent=self)
+            # 当窗口关闭时自动清除引用
+            self.sampshow_win.destroyed.connect(lambda: setattr(self, 'sampshow_win', None))
+
+        # 设置为模态窗口
+        self.sampshow_win.setWindowModality(Qt.ApplicationModal)
+        self.sampshow_win.show()
+        self.sampshow_win.activateWindow()
 
 
 # 显示QT运行中存在的错误

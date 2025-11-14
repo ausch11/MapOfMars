@@ -11,6 +11,43 @@ import threading
 from typing import Callable, Optional
 
 
+# 对数据进行拉伸处理
+def gray_process(gray, truncated_value=0.5, maxout=255, minout=0):
+    truncated_down = np.percentile(gray, truncated_value)
+    truncated_up = np.percentile(gray, 100 - truncated_value)
+    gray_new = ((maxout - minout) / (truncated_up - truncated_down)) * (gray - truncated_down)
+    gray_new[gray_new < minout] = minout
+    gray_new[gray_new > maxout] = maxout
+    return np.uint8(gray_new)
+
+def arr2raster(arr, raster_file, path):
+    example = gdal.Open(path)
+    prj = example.GetProjection()
+    trans = example.GetGeoTransform()
+
+    # 处理单波段/多波段数组维度
+    if arr.ndim == 2:
+        # 单波段：添加通道维度变为 (H, W, 1)
+        num_bands = 1
+        arr = arr[..., np.newaxis]  # 转换为3D数组以便统一处理
+    elif arr.ndim == 3:
+        # 多波段：直接使用第三维度作为波段数
+        num_bands = arr.shape[2]
+    else:
+        raise ValueError(f"不支持非单波段或多波段数组")
+
+    driver = gdal.GetDriverByName('GTiff')
+    # 使用动态确定的波段数num_bands，而非固定取arr.shape[2]
+    dst_ds = driver.Create(raster_file, arr.shape[1], arr.shape[0], num_bands, gdal.GDT_Byte)
+
+    dst_ds.SetProjection(prj)
+    dst_ds.SetGeoTransform(trans)
+
+    # 将数组的各通道写入图片（统一处理单/多波段）
+    for b in range(num_bands):
+        dst_ds.GetRasterBand(b + 1).WriteArray(arr[:, :, b])
+
+    dst_ds.FlushCache()
 
 def read_dataset(path, parent=None):
     """打开 GDAL 数据集并做初步校验。返回 dataset 或抛出异常。"""
